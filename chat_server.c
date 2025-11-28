@@ -10,8 +10,12 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#define PORT        4267
+#define MAX_CLIENTS 64
+#define BUF_SZ      1024
+
 //client setup for max and current amt with mutex for protection of multiple threads
-static int clients[8];
+static int clients[MAX_CLIENTS];
 static int client_count = 0;
 static pthread_mutex_t clients_mtx = PTHREAD_MUTEX_INITIALIZER;
 
@@ -27,8 +31,8 @@ static void die(const char *what){
 
 //adding client
 static void add_client_or_fail(int fd){
-	if(pthread_mutex_lock(&client_mtxc) != 0)
-		die("mutex lock");
+    if(pthread_mutex_lock(&clients_mtx) != 0)
+        die("mutex lock");
 	if(client_count >= 8){
 		pthread_mutex_unlock(&clients_mtx);
 		const char *msg = "Server full.\n";
@@ -77,11 +81,11 @@ static void broadcast_to_all_except(int sender_fd, const char *buf, size_t len) 
 }
 
 //add line to history
-static void append_to_history(const char *line){
+static void log_history_line(const char *line){
 	if(pthread_mutex_lock(&history_mtx) != 0)
 		return;
 	if(history_fp == NULL){
-		history_fp = fopen("chat_history.txt", "a");
+		history_fp = fopen("chat_history", "a");
 		if(history_fp == NULL){
 			pthread_mutex_unlock(&history_mtx);
 			return;
@@ -112,7 +116,7 @@ static void *client_thread(void *arg) {
     // announce join (broadcast + log)
     {
         char line[128];
-        int m = snprintf(line, sizeof(line), "[%s] joined\n", who);
+        int m = snprintf(line, sizeof(line), "[%s] joined", who);
         if (m > 0) {
             broadcast_to_all_except(fd, line, (size_t)m);
             log_history_line(line);
@@ -171,8 +175,8 @@ int main(void) {
     signal(SIGPIPE, SIG_IGN); // don’t die on send() to closed socket
 
     // open history file in append mode (creates if not exists)
-    history_fp = fopen("chat_history.txt", "a");
-    if (!history_fp) die("fopen chat_history.txt");
+    history_fp = fopen("chat_history", "a");
+    if (!history_fp) die("fopen chat_history");
 
     // create listening socket
     int s = socket(AF_INET, SOCK_STREAM, 0);
