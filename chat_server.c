@@ -55,75 +55,174 @@ static void remove_client(int fd){
 }
 
 //copy locked list, then unlock, then send to avoid block
-static void broadcast_to_all
-//CONTINUE FROM HERE
+static void broadcast_to_all_except(int sender_fd, const char *buf, size_t len) {
+    int snapshot[MAX_CLIENTS];
+    int n;
 
+    if (pthread_mutex_lock(&clients_mtx) != 0) return;
+    n = client_count;
+    for (int i = 0; i < n; i++) snapshot[i] = clients[i];
+    pthread_mutex_unlock(&clients_mtx);
 
+    for (int i = 0; i < n; i++) {
+        int fd = snapshot[i];
+        if (fd == sender_fd) continue;
+        size_t off = 0;
+        while (off < len) {
+            ssize_t w = send(fd, buf + off, len - off, 0);
+            if (w <= 0) break;
+            off += (size_t)w;
+        }
+    }
+}
 
-static void *client_thread(void *arg){
-	int fd = (int)(intptr_t)arg;
-	char buf[1000];
-
-	//recieve all data from client socket
-	for(1){
-		ssize_t n = recv(fd, buf, sizeof(buf), 0);
-		//client closed or error
-		if(n<=0) 
-			break;
-		send(fd, buf, (size_t)n, 0);
+//add line to history
+static void append_to_history(const char *line){
+	if(pthread_mutex_lock(&history_mtx) != 0)
+		return;
+	if(history_fp == NULL){
+		history_fp = fopen("chat_history.txt", "a");
+		if(history_fp == NULL){
+			pthread_mutex_unlock(&history_mtx);
+			return;
+		}
 	}
-	close(fd);
-	return NULL;
+	fprintf(history_fp, "%s\n", line);
+	fflush(history_fp);
+	pthread_mutex_unlock(&history_mtx);
 }
 
 
-int main(){
-	int fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (fd<0)
-		report("socket", 1);
+struct client_info {
+	int fd;
+	struct sockaddr_in addr;
+};
 
-	struct sockaddr_in saddr;
-	memset(&saddr, 0, sizeof(saddr));
-	saddr.sin_family = AF_INET;
-	saddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	saddr.sin_port = htons(PortNumber);
+static void *client_thread(void *arg) {
+    struct client_info *ci = (struct client_info *)arg;
+    int fd = ci->fd;
 
-	if (bind(fd, (struct sockaddr *) &saddr, sizeof(saddr)) < 0)
-		report("bind", 1);
+    char who[64];
+    snprintf(who, sizeof(who), "%s:%d",
+             inet_ntoa(ci->addr.sin_addr), ntohs(ci->addr.sin_port));
+    free(ci);
 
-	if(listen(fd, MaxConnects) < 0)
-		report("listen", 1);
-	fprintf(stderr, "Listening on port %i for clients...\n", PortNumber);
+    add_client_or_fail(fd);
 
-	while(1){
-		struct sockaddr_in caddr;
-		int len = sizeof(caddr);
-		int client_fd = accept(fd, (struct socaddr*) &caddr, $len);
+    // announce join (broadcast + log)
+    {
+        char line[128];
+        int m = snprintf(line, sizeof(line), "[%s] joined\n", who);
+        if (m > 0) {
+            broadcast_to_all_except(fd, line, (size_t)m);
+            log_history_line(line);
+        }
+    }
 
-		if (client_fd < 0){
-			report("accept", 0);
-			continue;
-		}
+    char buf[BUF_SZ];
+    for (;;) {
+        ssize_t n = recv(fd, buf, sizeof(buf), 0);
+        if (n == 0) break;           // orderly close
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            break;                   // error
+        }
 
-		printf("Client Connected: %s:%d\n", inet_ntoa(caddr.sin_addr), ntohs(caddr.sin_port));
+        // ensure messages are newline-terminated for clean logging
+        // (optional; the client may already send \n)
+        // We’ll build a "who: message" line for history + broadcast
+        char line[BUF_SZ + 80];
+        // truncate safely if needed
+        size_t msg_len = (size_t)n;
+        if (msg_len > BUF_SZ) msg_len = BUF_SZ;
 
-		pthread_t pth;
-		if(pthread_create(&pth, NULL, client_thread, (void*)(intprt_t)c) != 0) {
-			perror("pthread_create");
-			close(c);
-			continue;
-		}
+        // Build: [ip:port] message
+        int hdr = snprintf(line, sizeof(line), "[%s] ", who);
+        size_t copy_len = sizeof(line) - (size_t)hdr - 2; // leave room for \n\0
+        if (msg_len < copy_len) copy_len = msg_len;
+        memcpy(line + hdr, buf, copy_len);
+        // ensure newline at end:
+        size_t total = (size_t)hdr + copy_len;
+        if (total == 0 || line[total - 1] != '\n') line[total++] = '\n';
+        line[total] = '\0';
 
-		pthread_detach(pth);
-	}
+        // broadcast (exclude sender) and log
+        broadcast_to_all_except(fd, line, total);
+        log_history_line(line);
+    }
 
-	close(fd);
-	return 0;
+    // announce leave
+    {
+        char line[128];
+        int m = snprintf(line, sizeof(line), "[%s] left\n", who);
+        if (m > 0) {
+            broadcast_to_all_except(fd, line, (size_t)m);
+            log_history_line(line);
+        }
+    }
 
-
-	ssize_t read(int fildes, void *buf. size_t nbyte, off_t offset);
-	ssize_t write(int fildes, const void *buf, size_t nbyte);
-
+    remove_client(fd);
+    close(fd);
+    return NULL;
 }
 
 
+int main(void) {
+    signal(SIGPIPE, SIG_IGN); // don’t die on send() to closed socket
+
+    // open history file in append mode (creates if not exists)
+    history_fp = fopen("chat_history.txt", "a");
+    if (!history_fp) die("fopen chat_history.txt");
+
+    // create listening socket
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s < 0) die("socket");
+
+    // allow quick restart
+    int opt = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    // bind to 0.0.0.0:PORT
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family      = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port        = htons(PORT);
+
+    if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) die("bind");
+    if (listen(s, MAX_CLIENTS) < 0) die("listen");
+
+    printf("Chat server listening on %d\n", PORT);
+
+    // accept loop
+    for (;;) {
+        struct sockaddr_in caddr;
+        socklen_t clen = sizeof(caddr);
+        int c = accept(s, (struct sockaddr*)&caddr, &clen);
+        if (c < 0) {
+            if (errno == EINTR) continue;
+            perror("accept");
+            continue;
+        }
+
+        // create one thread per client
+        pthread_t th;
+        struct client_info *ci = (struct client_info *)malloc(sizeof(*ci));
+        if (!ci) { perror("malloc"); close(c); continue; }
+        ci->fd = c;
+        ci->addr = caddr;
+
+        if (pthread_create(&th, NULL, client_thread, ci) != 0) {
+            perror("pthread_create");
+            close(c);
+            free(ci);
+            continue;
+        }
+        pthread_detach(th); // auto-clean thread resources
+    }
+
+    // (unreachable in this minimal server)
+    fclose(history_fp);
+    close(s);
+    return 0;
+}
