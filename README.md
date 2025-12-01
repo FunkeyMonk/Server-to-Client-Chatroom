@@ -1,7 +1,7 @@
 # Server-to-Client-Chatroom
 A C program to run a chatroom between a network through multiple computers/terminals
 ## To run:
-1) Run command "$ gcc -pthread chat_server.c -o chat_server"
+1) Run command "$ gcc -pthread chat_client.c -o chat_client"
 2) Run command "$ gcc -pthread chat_server.c -o chat_server"
 3) Open two more ssh terminals to have 3 terminals total
 4) Run command $ "./chat_server on one terminal"
