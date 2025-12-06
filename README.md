@@ -10,3 +10,18 @@ A C program to run a chatroom between a network through multiple computers/termi
 ## Quitting:
 - Clients can quit using ctrl+D
 - Host shutdown server using ctrl+C
+## TODO:
+Understandings:
+- [ ] Server thread functions
+- [ ] Server how spawn thread
+- [ ] Server semaphore/mutexes used
+- [ ] Server # of pthreads potentially able to spawn
+- [ ] **FULL SERVER UNDERSTANDING**
+- [ ] Client thread functions
+- [ ] Client semaphore/mutexes used if any
+- [ ] **FULL CLIENT UNDERSTANDING**
+
+After:
+- [ ] **Create makefile** (IMPORTANT)
+- [ ] Usernames in chat room
+- [ ] Graceful exit for server/client (not just ctrl+c)
