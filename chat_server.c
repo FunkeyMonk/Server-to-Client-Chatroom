@@ -3,7 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <signal.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -214,9 +213,6 @@ static void *client_thread(void *arg) {
 
 
 int main(void) {
-	//ignore SIGPIPE signals, which would kill server from a client error
-    signal(SIGPIPE, SIG_IGN);
-
     //open history in append mode or return error if can't open
     history_fp = fopen("chat_history", "a");
     if (!history_fp) die("fopen chat_history");
