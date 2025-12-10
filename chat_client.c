@@ -119,7 +119,8 @@ int main(int argc, char *argv[]) {
 
     //create receive thread to listen for incoming messages from server
     //this allows main thread to send while recv_thread receives simultaneously
-    //without threads, program would block on either send or receive, not both    pthread_t th;
+    //without threads, program would block on either send or receive, not both   
+    pthread_t th;
     if (pthread_create(&th, NULL, recv_thread, (void *)(intptr_t)fd) != 0) {
         //thread creation failed
         perror("pthread_create");
