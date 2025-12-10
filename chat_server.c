@@ -29,9 +29,9 @@ static FILE *history_fp = NULL;
 static pthread_mutex_t history_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 //kill on error, prints what error occured and exits program
-static void die(const char *what){
-	perror(what);
-	exit(EXIT_FAILURE);
+void report(const char* msg, int terminate) {
+  perror(msg);
+  if (terminate) exit(-1); /* failure */
 }
 
 //adding client
@@ -39,7 +39,7 @@ static void add_client_or_fail(int fd){
 	//puts a lock so current thread is only thread with access to client_count and clients
     if(pthread_mutex_lock(&clients_mtx) != 0)
 		//kill if fail
-        die("mutex lock");
+        report("mutex lock", 1);
 	//sets a max of 8 clients, 64 as a failsafe? can change later to 8
 	//unlock mutex, print full server, close socket, and exit thread
 	if(client_count >= 8){
@@ -215,11 +215,11 @@ static void *client_thread(void *arg) {
 int main(void) {
     //open history in append mode or return error if can't open
     history_fp = fopen("chat_history", "a");
-    if (!history_fp) die("fopen chat_history");
+    if (!history_fp) report("fopen chat_history", 1);
 
     //create socket (idrk what this means but it was given)
     int s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s < 0) die("socket");
+    if (s < 0) report("socket", 1);
 
     //
     int opt = 1;
@@ -233,9 +233,9 @@ int main(void) {
     addr.sin_port        = htons(PORT);
 
 	//bind socket to the address to keep it at the specific port and return error if fail
-    if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) die("bind");
+    if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) report("bind", 1);
 	//listen for potential connections, reject if full, return error if fail
-    if (listen(s, MAX_CLIENTS) < 0) die("listen");
+    if (listen(s, MAX_CLIENTS) < 0) report("listen", 1);
 
 	//shows server is started
     printf("Chat server listening on %d\n", PORT);
