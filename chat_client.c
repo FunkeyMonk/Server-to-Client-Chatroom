@@ -13,41 +13,6 @@
 //buffer size constant, max bytes received or sent at once
 #define BUF_SZ 1024
 
-//file pointer to store chat history on client side for record keeping
-static FILE *history_fp = NULL;
-//mutex protects history_fp from being written to by multiple threads at the same time, avoiding race conditions
-static pthread_mutex_t history_mtx = PTHREAD_MUTEX_INITIALIZER;
-
-//adds one line to chat_history.txt in a thread-safe manner
-//prefix is "[RECV]" or "[SENT]" to mark the direction of the message
-//msg is the actual message content to be logged
-static void log_history_line(const char *prefix, const char *msg) {
-    //if history file not open, return early
-    if (!history_fp) return;
-    //lock mutex so only this thread can write to history file
-    //if lock fails, return early
-    if (pthread_mutex_lock(&history_mtx) != 0) return;
-
-    //write prefix (direction indicator) to file
-    fputs(prefix, history_fp);
-    //write space separator
-    fputs(" ", history_fp);
-    //write the actual message content
-    fputs(msg, history_fp);
-
-    //get length of message
-    size_t len = strlen(msg);
-    //if message is empty or doesn't end with newline, add one
-    if (len == 0 || msg[len - 1] != '\n')
-        fputc('\n', history_fp);
-
-    //flush file buffer to ensure data is written to disk immediately
-    //important for real-time updates visible to server and other clients
-    fflush(history_fp);
-    //unlock mutex to allow other threads to write to history
-    pthread_mutex_unlock(&history_mtx);
-}
-
 //thread function that receives messages from server and prints/logs them
 //runs concurrently with main thread, allowing simultaneous send and receive
 //arg is the socket file descriptor cast as (intptr_t) 
@@ -78,10 +43,6 @@ static void *recv_thread(void *arg) {
         fputs(buf, stdout);
         //flush stdout to ensure message appears on screen right away
         fflush(stdout);
-
-        //log the received message to history file with [RECV] prefix
-        //marks this as an inbound message in the chat log        
-        log_history_line("[RECV]", buf);
     }
     
     //inform user that connection to server has been closed/lost
@@ -111,16 +72,7 @@ int main(int argc, char *argv[]) {
     //SIGPIPE is sent when trying to write to closed socket, would kill program
     //by ignoring it, program can handle error gracefully instead
     signal(SIGPIPE, SIG_IGN);
-
-    //open client-side history file in append mode
-    //allows keeping record of messages even after disconnect
-    history_fp = fopen("chat_history.txt", "a");
-    if (!history_fp) {
-        //print error and exit if file can't be opened
-        perror("fopen chat_history.txt");
-        return 1;
-    }
-
+    
     //create TCP socket for communication with server
     //AF_INET = IPv4 addressing, SOCK_STREAM = TCP protocol (reliable/ordered)
     //third argument 0 = default protocol for SOCK_STREAM (TCP)   
@@ -128,7 +80,6 @@ int main(int argc, char *argv[]) {
     if (fd < 0) {
         //socket creation failed
         perror("socket");
-        fclose(history_fp);
         return 1;
     }
 
@@ -140,7 +91,7 @@ int main(int argc, char *argv[]) {
     saddr.sin_family = AF_INET;
     //convert port from host byte order to network byte order (big-endian)
     //htons = host to network short
-    saddr.sin_port   = htons((unsigned short)port);
+    saddr.sin_port = htons((unsigned short)port);
 
     //parse IP address string into binary format
     //inet_pton converts string "127.0.0.1" to actual IP binary value
@@ -149,7 +100,6 @@ int main(int argc, char *argv[]) {
         //IP address parsing failed
         perror("inet_pton");
         close(fd);
-        fclose(history_fp);
         return 1;
     }
 
@@ -160,7 +110,6 @@ int main(int argc, char *argv[]) {
         //connection failed
         perror("connect");
         close(fd);
-        fclose(history_fp);
         return 1;
     }
 
@@ -175,7 +124,6 @@ int main(int argc, char *argv[]) {
         //thread creation failed
         perror("pthread_create");
         close(fd);
-        fclose(history_fp);
         return 1;
     }
 
@@ -207,10 +155,6 @@ int main(int argc, char *argv[]) {
             //increment offset by number of bytes successfully sent
             off += (size_t)n;
         }
-
-        //log the sent message to history file with [SENT] prefix
-        //marks this as an outbound message in the chat log
-        log_history_line("[SENT]", line);
     }
 
     //stdin closed (user pressed Ctrl+D)
@@ -229,8 +173,6 @@ out:
     //ensures clean shutdown before cleanup
     pthread_join(th, NULL);
 
-    //close the history file
-    fclose(history_fp);
     //exit program successfully
     return 0;
 }
