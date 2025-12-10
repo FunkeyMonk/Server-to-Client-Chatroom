@@ -10,7 +10,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-//buffer size constant, max bytes received or sent at once
+//buffer size, max bytes received/sent capable at once
 #define BUF_SZ 1024
 
 //thread function that receives messages from server and prints/logs them
