@@ -3,7 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <signal.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -67,11 +66,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Invalid port: %s\n", argv[2]);
         return 1;
     }
-
-    //ignore SIGPIPE signal
-    //SIGPIPE is sent when trying to write to closed socket, would kill program
-    //by ignoring it, program can handle error gracefully instead
-    signal(SIGPIPE, SIG_IGN);
     
     //create TCP socket for communication with server
     //AF_INET = IPv4 addressing, SOCK_STREAM = TCP protocol (reliable/ordered)
