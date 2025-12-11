@@ -133,4 +133,12 @@ int main(int argc, char *argv[]) {
     //stdin closed (user pressed Ctrl+D)
     printf("\n[client] Input closed, shutting down.\n");
 
+    //Tell the server this side is done sending and receiving
+    shutdown(fd, SHUT_RDWR);
+    //close the socket file descriptor
+    close(fd);
+    //pthread_join blocks until recv_thread returns
+    //wait for the receiver thread to finish before exiting process
+    pthread_join(th, NULL);
+    return 0;  // connection broken
 }
