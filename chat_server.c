@@ -214,7 +214,7 @@ static void *client_thread(void *arg) {
     {
 		//holds and creates line of who joined
         char line[128];
-        int m = snprintf(line, sizeof(line), "[%s] joined", who);
+        int m = snprintf(line, sizeof(line), "[%s] joined\n", who);
 		//if successful, send join message to all clients except joined client, then save to history
         if (m > 0) {
             broadcast_to_all_except(fd, line, (size_t)m);
