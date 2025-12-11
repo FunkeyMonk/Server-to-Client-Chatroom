@@ -371,6 +371,6 @@ int main(void) {
 
     //failsafe if shutdown_server doesnt work for some reason
     fclose(history_fp);
-    close(s);
+    close(server_socket);
     return 0;
 }
