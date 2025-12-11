@@ -12,6 +12,9 @@
 //Buffer size, max bytes received/sent capable at once
 #define BUF_SZ 1024
 
+//to tell thread when done
+static volatile int running = 1;
+
 //Thread function receive messages from server and prints/logs them
 //runs together with main thread
 //arg is the socket file descriptor
@@ -26,7 +29,8 @@ static void *recv_thread(void *arg) {
         if (n <= 0) {
             //if error was interrupted system call, continue trying to receive
             if (n < 0 && errno == EINTR) continue; // If interrupted by signal, retry recv
-             break;  //otherwise server closed or error
+            fprintf(stderr, "\n[client] Disconnected from server.\n");
+            break;  //otherwise server closed or error
         }
          //Turn received bytes into a C string
         buf[n] = '\0';
@@ -36,9 +40,47 @@ static void *recv_thread(void *arg) {
         //flush stdout to make message appear in real-time on screen
         fflush(stdout);
     }
-    
-    fprintf(stderr, "\n[client] Disconnected from server.\n");
+
+    //sender thread now stops
+    running = 0;
     //thread exits by returning NULL
+    return NULL;
+}
+
+
+static void *send_thread(void *arg) {
+    int fd = (int)(intptr_t)arg;
+    char line[BUF_SZ];
+
+    while (running && fgets(line, sizeof(line), stdin) != NULL) {
+        size_t len = strlen(line);
+        if (len == 0) continue;
+
+        if (strcmp(line, "exit\n") == 0 ||
+            strcmp(line, "exit\r\n") == 0 ||
+            strcmp(line, "exit") == 0) {
+
+            fprintf(stderr, "[client] Exiting and disconnecting from server.\n");
+            running = 0;
+
+            shutdown(fd, SHUT_RDWR); 
+            break;
+        }
+
+        size_t off = 0;
+        while (off < len && running) {
+            ssize_t n = send(fd, line + off, len - off, 0);
+            if (n <= 0) {
+                if (n < 0 && errno == EINTR) continue;
+                fprintf(stderr, "\n[client] Error sending, closing.\n");
+                running = 0;
+                break;
+            }
+            off += (size_t)n;
+        }
+    }
+
+    running = 0;
     return NULL;
 }
 
@@ -89,56 +131,56 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Connected to %s:%d\n", server_ip, port);
-    printf("Type messages and press Enter. Ctrl+D to quit.\n");
 
-    //Spawn receiver thread so receiving does not block sending from main thread
-    pthread_t th;
-    if (pthread_create(&th, NULL, recv_thread, (void *)(intptr_t)fd) != 0) {
-        //thread creation fails
-        perror("pthread_create");
+    char username[64];
+    printf("Enter username: ");
+    fflush(stdout);
+    if (fgets(username, sizeof(username), stdin) == NULL) {
+        fprintf(stderr, "No username entered.\n");
+        close(fd);
+        return 1;
+    }
+    size_t ulen = strlen(username);
+    if (ulen > 0 && username[ulen - 1] == '\n') {
+        username[ulen - 1] = '\0';
+        ulen--;
+    }
+    {
+        char uname_line[70];
+        int m = snprintf(uname_line, sizeof(uname_line), "%s\n", username);
+        if (m > 0) {
+            ssize_t n = send(fd, uname_line, (size_t)m, 0);
+            if (n <= 0) {
+                perror("send username");
+                close(fd);
+                return 1;
+            }
+        }
+    }
+
+    printf("Type messages and press Enter.\n");
+    printf("Type 'exit' to disconnect yourself from the server.\n");
+
+    pthread_t recv_th, send_th;
+    if (pthread_create(&recv_th, NULL, recv_thread, (void *)(intptr_t)fd) != 0) {
+        perror("pthread_create recv");
+        close(fd);
+        return 1;
+    }
+    if (pthread_create(&send_th, NULL, send_thread, (void *)(intptr_t)fd) != 0) {
+        perror("pthread_create send");
+        running = 0;
+        pthread_join(recv_th, NULL);
         close(fd);
         return 1;
     }
 
-    //Main thread: read from stdin and send to server
-    char line[BUF_SZ];
-    //loop until user presses Ctrl+D (EOF) or error 
-    while (fgets(line, sizeof(line), stdin) != NULL) {
-        size_t len = strlen(line);
-        if (len == 0) continue; //ignore completely empty lines
+    pthread_join(recv_th, NULL);
+    
+    running = 0;
+    pthread_cancel(send_th); 
+    pthread_join(send_th, NULL);
 
-        //loop handles partial sends until all len bytes are written
-        size_t off = 0;
-        while (off < len) {
-            //n == 0 or n < 0: problem with the connection or call
-            ssize_t n = send(fd, line + off, len - off, 0);
-            if (n <= 0) {
-                //retry if a signal interrupted send
-                if (n < 0 && errno == EINTR) continue;
-                //on actual error, break out and clean up
-                //Tell the server this side is done sending and receiving
-                shutdown(fd, SHUT_RDWR);
-                //close the socket file descriptor
-                close(fd);
-                //pthread_join blocks until recv_thread returns
-                //wait for the receiver thread to finish before exiting process
-                pthread_join(th, NULL);
-                return 0;  // connection broken
-            }
-            //increment offset by number of bytes successfully sent
-            off += (size_t)n;
-        }
-    }
-
-    //stdin closed (user pressed Ctrl+D)
-    printf("\n[client] Input closed, shutting down.\n");
-
-    //Tell the server this side is done sending and receiving
-    shutdown(fd, SHUT_RDWR);
-    //close the socket file descriptor
     close(fd);
-    //pthread_join blocks until recv_thread returns
-    //wait for the receiver thread to finish before exiting process
-    pthread_join(th, NULL);
-    return 0;  // connection broken
+    return 0;
 }
