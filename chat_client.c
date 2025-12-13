@@ -47,39 +47,46 @@ static void *recv_thread(void *arg) {
     return NULL;
 }
 
-
+//New thread function to send messages from standard input to server
+//Reads the input and and sends to server until done
 static void *send_thread(void *arg) {
     int fd = (int)(intptr_t)arg;
     char line[BUF_SZ];
 
+    //continues reading while so long as running flag is set
     while (running && fgets(line, sizeof(line), stdin) != NULL) {
         size_t len = strlen(line);
-        if (len == 0) continue;
+        if (len == 0) continue; //skip empty lines
 
+        //to check if user types "exit" command
         if (strcmp(line, "exit\n") == 0 ||
             strcmp(line, "exit\r\n") == 0 ||
             strcmp(line, "exit") == 0) {
 
             fprintf(stderr, "[client] Exiting and disconnecting from server.\n");
-            running = 0;
+            running = 0; //tells all threads to stop if so
 
-            shutdown(fd, SHUT_RDWR); 
+            shutdown(fd, SHUT_RDWR); //shutsdown connection
             break;
         }
 
+        //Sends whole message to server, works with partial sends
         size_t off = 0;
         while (off < len && running) {
+            //returns number of bytes sent, -1 on error
             ssize_t n = send(fd, line + off, len - off, 0);
             if (n <= 0) {
+                //If interupted, retry send
                 if (n < 0 && errno == EINTR) continue;
                 fprintf(stderr, "\n[client] Error sending, closing.\n");
                 running = 0;
                 break;
             }
-            off += (size_t)n;
+            off += (size_t)n; 
         }
     }
 
+    //Tells all threads to stop
     running = 0;
     return NULL;
 }
@@ -132,6 +139,7 @@ int main(int argc, char *argv[]) {
 
     printf("Connected to %s:%d\n", server_ip, port);
 
+    //Now prompts user for a username
     char username[64];
     printf("Enter username: ");
     fflush(stdout);
@@ -140,13 +148,18 @@ int main(int argc, char *argv[]) {
         close(fd);
         return 1;
     }
+    //Gets rid of trailing newline from usermname
+    //fgets includes newline
     size_t ulen = strlen(username);
     if (ulen > 0 && username[ulen - 1] == '\n') {
         username[ulen - 1] = '\0';
         ulen--;
     }
+    
+    //Send username to server with newline delimiter
     {
         char uname_line[70];
+        //returns number of characters written, negative on error
         int m = snprintf(uname_line, sizeof(uname_line), "%s\n", username);
         if (m > 0) {
             ssize_t n = send(fd, uname_line, (size_t)m, 0);
@@ -161,26 +174,30 @@ int main(int argc, char *argv[]) {
     printf("Type messages and press Enter.\n");
     printf("Type 'exit' to disconnect yourself from the server.\n");
 
+    //Create recieve thread for incoming server messages
     pthread_t recv_th, send_th;
     if (pthread_create(&recv_th, NULL, recv_thread, (void *)(intptr_t)fd) != 0) {
         perror("pthread_create recv");
         close(fd);
         return 1;
     }
+    //Create send thread to handle released user messages
     if (pthread_create(&send_th, NULL, send_thread, (void *)(intptr_t)fd) != 0) {
         perror("pthread_create send");
         running = 0;
-        pthread_join(recv_th, NULL);
+        pthread_join(recv_th, NULL); //waits for recieve thread to finish
         close(fd);
         return 1;
     }
 
+    //Waits for recieve thread to complete
     pthread_join(recv_th, NULL);
-    
+    //Signals send thread to stop and cancel
     running = 0;
-    pthread_cancel(send_th); 
-    pthread_join(send_th, NULL);
+    pthread_cancel(send_th); //forces send thread termination
+    pthread_join(send_th, NULL); //waits for send thread to cleanup
 
+    //Now close socket and cleanup
     close(fd);
     return 0;
 }
