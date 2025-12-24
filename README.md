@@ -8,20 +8,5 @@ A C program to run a chatroom between a network through multiple computers/termi
 5) On the other two terminals, run these commands if all 3 are on the same ssh host "$ ./chat_client 127.0.0.1 4267"
 6) If a terminal is off the host's ssh server, instead of using the IP 127.0.0.1, use the host's IP address instead. To find that, the host will give you the IP (if they trust you enough) through typing "$ hostname -I".
 ## Quitting:
-- Clients can quit using ctrl+D
-- Host shutdown server using ctrl+C
-## TODO:
-Understandings:
-- [ ] Server thread functions
-- [ ] Server how spawn thread
-- [ ] Server semaphore/mutexes used
-- [ ] Server # of pthreads potentially able to spawn
-- [ ] **FULL SERVER UNDERSTANDING**
-- [ ] Client thread functions
-- [ ] Client semaphore/mutexes used if any
-- [ ] **FULL CLIENT UNDERSTANDING**
-
-After:
-- [ ] **Create makefile** (IMPORTANT)
-- [ ] Usernames in chat room
-- [ ] Graceful exit for server/client (not just ctrl+c)
+- Clients can quit by typing "exit" in chat room
+- Host shutdown server by pressing enter
